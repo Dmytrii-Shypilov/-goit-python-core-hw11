@@ -2,6 +2,7 @@ import re
 import sys
 
 from collections import UserDict
+from datetime import datetime, timedelta
 
 
 class AddressBook(UserDict):
@@ -23,12 +24,13 @@ class AddressBook(UserDict):
 
 
 class Record:
-    def __init__(self, name, phone=''):
+    def __init__(self, name, phone=None, birthday=None):
         self.name = name
-        if phone == '':
+        if not phone:
             self.phone_numbers = []
         else:
             self.phone_numbers = [phone]
+        self.birthday = birthday
 
     def add_phone(self, phone):
         self.phone_numbers.append(phone)
@@ -45,8 +47,30 @@ class Record:
         self.phone_numbers.pop(idx)
 
     def get_phone(self):
+        if not len(self.phone_numbers):
+            return f"No numbers have been added to {self.name.value}'s phone list yet"
         phones_list = map(lambda x: x.value, self.phone_numbers)
         return f"{' '.join(phones_list)}"
+
+    def days_to_birthday(self):
+        today = datetime.now()
+        month, year = today.month, today.year
+
+        b_day, b_month = self.birthday.value.day, self.birthday.value.month
+
+        if month <= b_month:
+            b_year = year
+        else:
+            b_year = year + 1
+        days_left = datetime(day=b_day, month=b_month, year=b_year) - today
+        return days_left.days
+
+    def add_birthday(self, date):
+        if self.birthday:
+            return None
+        else:
+            self.birthday = date
+            return date
 
 
 class Field:
@@ -59,17 +83,50 @@ class Name(Field):
 
 
 class Phone(Field):
-    def __init__(self, value):
-        self.value = value
+    def __init__(self):
+        self.__value = None
+
+    @property
+    def value(self):
+        return self.__value
+
+    @value.setter
+    def value(self, phone):
+        valid_phone = re.match(DATA_FORMATS['phone'], phone)
+        if not valid_phone:
+            raise ValueError(
+                "Assistant: Number should start with '+' and contain 12 digits. Please, try again")
+        else:
+            self.__value = phone
+
+
+class Birthday(Field):
+    def __init__(self):
+        self.__value = None
+
+    @property
+    def value(self):
+        return self.__value
+
+    @value.setter
+    def value(self, date):
+        valid_date = re.match(DATA_FORMATS['date'], date)
+        if not valid_date:
+            raise ValueError(
+                "Assistant: Date should be of following format DD-MM-YYYY")
+        else:
+            [d, m, y] = date.split('-')
+            self.__value = datetime(day=int(d), month=int(m), year=int(y))
 
 
 phone_book = AddressBook()
 
 COMMANDS = ['show all', 'good bye', 'hello',
-            'exit', 'close', 'add', 'change', 'phone', 'new phone', 'delete contact', 'delete phone']
+            'exit', 'close', 'add', 'change', 'phone', 'new phone', 'delete contact', 'delete phone', 'birthday', 'set birthday']
 
 DATA_FORMATS = {
-    'phone': '^[+][0-9]{12}$'
+    'phone': '^[+][0-9]{12}$',
+    'date': '^[0-9]{2}-[0-9]{2}-[0-9]{4}$'
 }
 
 chat_in_progress = True
@@ -82,7 +139,7 @@ def input_error(func):
             return result
         except IndexError:
             print(
-                "Assistant: Please, type name and number (two numbers if you use 'change' command)")
+                "Assistant: Please, type name and number/date (two numbers if you use 'change' command)")
         except ValueError as err:
             print(err.args[0])
             return None
@@ -90,10 +147,15 @@ def input_error(func):
 
 
 def check_number_validity(number):
-    valid_number = re.match(DATA_FORMATS['phone'], number)
-    if not valid_number:
-        raise ValueError(
-            "Assistant: Number should start with '+' and contain 12 digits. Please, try again")
+    phone = Phone()
+    phone.value = number
+    return phone
+
+
+def check_date_validity(date):
+    birthday = Birthday()
+    birthday.value = date
+    return birthday
 
 
 def if_contact_exists(name):
@@ -127,6 +189,9 @@ def greet():
     return ('Assistant: Hello. How can I assist you?')
 
 
+''' Pagination should be done here'''
+
+
 def show_all_contacts():
     contacts_list = []
     contacts = phone_book.show_all()
@@ -142,8 +207,13 @@ def show_all_contacts():
 def add_contact(args):
     if len(args) > 1:
         name, phone = args[0], args[1]
-        check_number_validity(phone)
-        new_record = Record(Name(name), Phone(phone))
+        contact_phone = check_number_validity(phone)
+        new_record = Record(Name(name), contact_phone)
+        if len(args) > 2:
+            name, phone, birthday = args[0], args[1], args[2]
+            contact_phone = check_number_validity(phone)
+            birthday_date = check_date_validity(birthday)
+            new_record = Record(Name(name), contact_phone, birthday_date)
     else:
         name = args[0]
         new_record = Record(Name(name))
@@ -194,12 +264,11 @@ def change_number(args):
 @input_error
 def add_number(args):
     name, new_number = args[0], args[1]
-    check_number_validity(new_number)
+    new_phone = check_number_validity(new_number)
     contact = if_contact_exists(name)
     if not contact:
         return ("Assistant: Person with such name was not found")
-    phone = Phone(new_number)
-    contact.add_phone(phone)
+    contact.add_phone(new_phone)
     return f"Assistant: New number {new_number} was added to {name.title()}'s phone numbers list"
 
 
@@ -228,6 +297,29 @@ def delete_number(args):
     contact.delete_phone(phone)
     return (f"Assistant: Number {phone} was deleted from {name.title()}'s phone list")
 
+
+@input_error
+def get_birthday(args):
+    name = args[0]
+    contact = phone_book.search_for_record(name)
+    if not contact.birthday:
+        return f"Assistant: There has been no birthday data added for {contact.name.value} yet"
+    birth_date = contact.birthday.value.date()
+    days_to_birthday = contact.days_to_birthday()
+    if days_to_birthday == 0:
+        return f"Assistant: {contact.name.value}'s birtday is today. {contact.name.value} was born on {birth_date}"
+    return f"Assistant: {contact.name.value}'s birtday is in {days_to_birthday} days. {contact.name.value} was born on {birth_date}"
+
+@input_error
+def add_birthday(args):
+    name, date = args[0], args[1]
+    contact = if_contact_exists(name)
+    birthday = Birthday()
+    birthday.value = date
+    added_date = contact.add_birthday(birthday) 
+    if added_date:
+        return f"Assistant: Date {date} was successfully set as {contact.name.value}'s birthday"
+    return f"Assistant: {contact.name.value} already has his birthday set as {contact.birthday.value.date()}"
 
 def terminate_assistant():
     global chat_in_progress
@@ -262,6 +354,10 @@ def main():
             bot_message = delete_contact(args)
         case "delete phone":
             bot_message = delete_number(args)
+        case "birthday":
+            bot_message = get_birthday(args)
+        case "set birthday":
+            bot_message = add_birthday(args)
 
     if bot_message:
         print(bot_message)
