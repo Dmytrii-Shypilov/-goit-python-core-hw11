@@ -1,9 +1,31 @@
+import math
 import re
 import sys
 
 from collections import UserDict
 from datetime import datetime, timedelta
 
+class Iterable:
+    def __init__(self,list):
+        self.number = 3
+        self.start_idx = 0
+        self.current_count = 0
+        self.list = list
+        self.iterations = math.ceil(len(self.list)/self.number)
+    def __next__(self):
+       if self.current_count < self.iterations:
+           part = self.list[self.start_idx:self.number+self.start_idx]
+           self.start_idx += self.number
+           self.current_count +=1
+           return part   
+       raise StopIteration
+
+
+class PhoneBookIterator:
+    def __init__(self, list):
+        self.list = list
+    def __iter__(self):
+        return Iterable(self.list)
 
 class AddressBook(UserDict):
     def search_for_record(self, name):
@@ -21,6 +43,11 @@ class AddressBook(UserDict):
 
     def show_all(self):
         return self.data
+    
+    def iterator(self):
+        contacts_list = list(self.data.values())
+        generartor = PhoneBookIterator(contacts_list)
+        return generartor
 
 
 class Record:
@@ -121,7 +148,7 @@ class Birthday(Field):
 
 phone_book = AddressBook()
 
-COMMANDS = ['show all', 'good bye', 'hello',
+COMMANDS = ['show all', 'good bye', 'hello', 'show page',
             'exit', 'close', 'add', 'change', 'phone', 'new phone', 'delete contact', 'delete phone', 'birthday', 'set birthday']
 
 DATA_FORMATS = {
@@ -189,9 +216,6 @@ def greet():
     return ('Assistant: Hello. How can I assist you?')
 
 
-''' Pagination should be done here'''
-
-
 def show_all_contacts():
     contacts_list = []
     contacts = phone_book.show_all()
@@ -201,6 +225,26 @@ def show_all_contacts():
         else:
             contacts_list.append(f"\t{contact}: {data.get_phone()}\n")
     return "\n" + " ".join(contacts_list)
+
+@input_error
+def show_phonebook_by_page(args):
+    if args[0] == "":
+        raise ValueError("Assistant: Please type your page number")
+    number_of_page = int(args[0])
+    pages_generator = phone_book.iterator()
+    pages = list(pages_generator)
+    page = number_of_page - 1
+    if page <= len(pages)-1:
+        contacts = pages[number_of_page - 1]
+        res ='\t\n'
+        for contact in contacts:
+            if not len(contact.phone_numbers):
+                res += f"\t{contact.name.value}: No numbers added yet\n"
+            else:
+                res += (f"\t{contact.name.value}: {contact.get_phone()}\n")
+        return res   
+    raise ValueError(f"Assitant: This page number is out of range. Phone Book has only {len(pages)} page(s)")
+    
 
 
 @input_error
@@ -221,7 +265,7 @@ def add_contact(args):
     contact = if_contact_exists(name)
 
     if contact:
-        return ("Assistant: contact with such name alreday exists")
+        return ("Assistant: contact with such name already exists")
 
     message = phone_book.add_record(new_record)
 
@@ -358,6 +402,8 @@ def main():
             bot_message = get_birthday(args)
         case "set birthday":
             bot_message = add_birthday(args)
+        case 'show page':
+            bot_message = show_phonebook_by_page(args)
 
     if bot_message:
         print(bot_message)
